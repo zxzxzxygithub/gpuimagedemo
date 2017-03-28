@@ -16,12 +16,32 @@
 
 package jp.co.cyberagent.android.gpuimage.sample.activity;
 
+import android.Manifest;
+import android.app.Activity;
+import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.hardware.Camera;
+import android.net.Uri;
+import android.opengl.GLSurfaceView;
+import android.os.Bundle;
+import android.os.Environment;
+import android.support.annotation.NonNull;
+import android.support.v4.app.ActivityCompat;
+import android.util.Log;
+import android.view.View;
+import android.view.View.OnClickListener;
+import android.widget.SeekBar;
+import android.widget.SeekBar.OnSeekBarChangeListener;
+import android.widget.Toast;
+
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.List;
 
 import jp.co.cyberagent.android.gpuimage.GPUImage;
 import jp.co.cyberagent.android.gpuimage.GPUImage.OnPictureSavedListener;
@@ -31,29 +51,14 @@ import jp.co.cyberagent.android.gpuimage.sample.GPUImageFilterTools.FilterAdjust
 import jp.co.cyberagent.android.gpuimage.sample.GPUImageFilterTools.OnGpuImageFilterChosenListener;
 import jp.co.cyberagent.android.gpuimage.sample.R;
 import jp.co.cyberagent.android.gpuimage.sample.utils.CameraHelper;
-import jp.co.cyberagent.android.gpuimage.sample.utils.CameraHelper.CameraInfo2;
-import android.app.Activity;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.hardware.Camera;
-import android.hardware.Camera.CameraInfo;
-import android.hardware.Camera.Parameters;
-import android.net.Uri;
-import android.opengl.GLSurfaceView;
-import android.os.Bundle;
-import android.os.Environment;
-import android.util.Log;
-import android.view.View;
-import android.view.View.OnClickListener;
-import android.widget.SeekBar;
-import android.widget.SeekBar.OnSeekBarChangeListener;
+import jp.co.cyberagent.android.gpuimage.sample.utils.CameraUtils;
 
 public class ActivityCamera extends Activity implements OnSeekBarChangeListener,
         OnClickListener {
 
     private GPUImage mGPUImage;
     private CameraHelper mCameraHelper;
-    private CameraLoader mCamera;
+    private CameraLoader mCameraLoader;
     private GPUImageFilter mFilter;
     private FilterAdjuster mFilterAdjuster;
 
@@ -64,30 +69,66 @@ public class ActivityCamera extends Activity implements OnSeekBarChangeListener,
         ((SeekBar) findViewById(R.id.seekBar)).setOnSeekBarChangeListener(this);
         findViewById(R.id.button_choose_filter).setOnClickListener(this);
         findViewById(R.id.button_capture).setOnClickListener(this);
-
+//      1。gpuimage init
         mGPUImage = new GPUImage(this);
+        mGPUImage.setFilter(new jp.co.cyberagent.android.gpuimage.GPUImageBilateralFilter(30f));
+        mGPUImage.setFilter(new jp.co.cyberagent.android.gpuimage.GPUImageContrastFilter(1.5f));
+        mGPUImage.setFilter(new jp.co.cyberagent.android.gpuimage.GPUImageSaturationFilter(1.4f));
+        mGPUImage.setFilter(new jp.co.cyberagent.android.gpuimage.GPUImageBrightnessFilter(0.1f));
         mGPUImage.setGLSurfaceView((GLSurfaceView) findViewById(R.id.surfaceView));
 
         mCameraHelper = new CameraHelper(this);
-        mCamera = new CameraLoader();
+        mCameraLoader = new CameraLoader();
 
         View cameraSwitchView = findViewById(R.id.img_switch_camera);
         cameraSwitchView.setOnClickListener(this);
         if (!mCameraHelper.hasFrontCamera() || !mCameraHelper.hasBackCamera()) {
             cameraSwitchView.setVisibility(View.GONE);
         }
+
+        int permi = ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA);
+        if (permi != PackageManager.PERMISSION_GRANTED) {
+            String[] permissions = {Manifest.permission.CAMERA};
+            ActivityCompat.requestPermissions(this, permissions, 111);
+        }
     }
+
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            // Permission Granted
+            Toast.makeText(this, "granted", Toast.LENGTH_SHORT).show();
+            finish();
+        } else {
+            // Permission Denied
+            Toast.makeText(ActivityCamera.this, "WRITE_CONTACTS Denied", Toast.LENGTH_SHORT)
+                    .show();
+        }
+    }
+
+    boolean hasResumed;
 
     @Override
     protected void onResume() {
         super.onResume();
-        mCamera.onResume();
+        if (!hasResumed) {
+            mCameraLoader.onResume();
+            hasResumed = true;
+        }
     }
 
     @Override
     protected void onPause() {
-        mCamera.onPause();
         super.onPause();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        mCameraLoader.onPause();
+
     }
 
     @Override
@@ -104,11 +145,11 @@ public class ActivityCamera extends Activity implements OnSeekBarChangeListener,
                 break;
 
             case R.id.button_capture:
-                if (mCamera.mCameraInstance.getParameters().getFocusMode().equals(
+                if (mCameraLoader.mCameraInstance.getParameters().getFocusMode().equals(
                         Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
                     takePicture();
                 } else {
-                    mCamera.mCameraInstance.autoFocus(new Camera.AutoFocusCallback() {
+                    mCameraLoader.mCameraInstance.autoFocus(new Camera.AutoFocusCallback() {
 
                         @Override
                         public void onAutoFocus(final boolean success, final Camera camera) {
@@ -119,22 +160,22 @@ public class ActivityCamera extends Activity implements OnSeekBarChangeListener,
                 break;
 
             case R.id.img_switch_camera:
-                mCamera.switchCamera();
+                mCameraLoader.switchCamera();
                 break;
         }
     }
 
     private void takePicture() {
         // TODO get a size that is about the size of the screen
-        Camera.Parameters params = mCamera.mCameraInstance.getParameters();
+        Camera.Parameters params = mCameraLoader.mCameraInstance.getParameters();
         params.setPictureSize(1280, 960);
         params.setRotation(90);
-        mCamera.mCameraInstance.setParameters(params);
-        for (Camera.Size size2 : mCamera.mCameraInstance.getParameters()
+        mCameraLoader.mCameraInstance.setParameters(params);
+        for (Camera.Size size2 : mCameraLoader.mCameraInstance.getParameters()
                 .getSupportedPictureSizes()) {
             Log.i("ASDF", "Supported: " + size2.width + "x" + size2.height);
         }
-        mCamera.mCameraInstance.takePicture(null, null,
+        mCameraLoader.mCameraInstance.takePicture(null, null,
                 new Camera.PictureCallback() {
 
                     @Override
@@ -169,7 +210,7 @@ public class ActivityCamera extends Activity implements OnSeekBarChangeListener,
 
                                     @Override
                                     public void onPictureSaved(final Uri
-                                            uri) {
+                                                                       uri) {
                                         pictureFile.delete();
                                         camera.startPreview();
                                         view.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
@@ -240,10 +281,19 @@ public class ActivityCamera extends Activity implements OnSeekBarChangeListener,
     }
 
     private class CameraLoader {
-        private int mCurrentCameraId = 0;
+        private int mCurrentCameraId = -1;
         private Camera mCameraInstance;
 
         public void onResume() {
+            Camera.CameraInfo info = new Camera.CameraInfo();
+            int numCameras = Camera.getNumberOfCameras();
+            for (int i = 0; i < numCameras; i++) {
+                Camera.getCameraInfo(i, info);
+                if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+                    mCurrentCameraId = i;
+                    break;
+                }
+            }
             setUpCamera(mCurrentCameraId);
         }
 
@@ -252,47 +302,151 @@ public class ActivityCamera extends Activity implements OnSeekBarChangeListener,
         }
 
         public void switchCamera() {
+            isfront=!isfront;
             releaseCamera();
-            mCurrentCameraId = (mCurrentCameraId + 1) % mCameraHelper.getNumberOfCameras();
             setUpCamera(mCurrentCameraId);
         }
 
+        boolean isfront=true;
+        //       2.setupcamera
         private void setUpCamera(final int id) {
-            mCameraInstance = getCameraInstance(id);
-            Parameters parameters = mCameraInstance.getParameters();
-            // TODO adjust by getting supportedPreviewSizes and then choosing
-            // the best one for screen size (best fill screen)
-            parameters.setPreviewSize(720, 480);
-            if (parameters.getSupportedFocusModes().contains(
-                    Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
-                parameters.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
+
+//            try {
+//                mCameraInstance = getCameraInstance(id);
+//            } catch (Exception e) {
+//                e.printStackTrace();
+//                Toast.makeText(ActivityCamera.this, "init camera failed" + e.getMessage(), Toast.LENGTH_LONG).show();
+//            }
+//            if (mCameraInstance == null) {
+//
+//                return;
+//            }
+//
+//            Parameters parameters = mCameraInstance.getParameters();
+//            logSize(parameters);
+//            // TODO adjust by getting supportedPreviewSizes and then choosing
+//            // the best one for screen size (best fill screen)
+//            parameters.setPreviewSize(720, 480);
+//            if (parameters.getSupportedFocusModes().contains(
+//                    Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
+//                parameters.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
+//            }
+//            mCameraInstance.setParameters(parameters);
+//
+//            int orientation = mCameraHelper.getCameraDisplayOrientation(
+//                    ActivityCamera.this, mCurrentCameraId);
+//            CameraInfo2 cameraInfo = new CameraInfo2();
+//            mCameraHelper.getCameraInfo(mCurrentCameraId, cameraInfo);
+//            boolean flipHorizontal = cameraInfo.facing == CameraInfo.CAMERA_FACING_FRONT
+//                    ? true : false;
+//            mGPUImage.setUpCamera(mCameraInstance, orientation, flipHorizontal, false);
+
+
+            onPause();
+            Camera.CameraInfo info = new Camera.CameraInfo();
+            int cameraId = 0;
+            int numCameras = Camera.getNumberOfCameras();
+            for (int i = 0; i < numCameras; i++) {
+                Camera.getCameraInfo(i, info);
+                if (isfront){
+                    if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+                        cameraId = i;
+                        try {
+                            mCameraInstance = Camera.open(i);
+                        } catch (Exception e) {
+                            releaseCamera();
+                            finish();
+                            return;
+                        }
+                    }
+                }else{
+                    if (info.facing == Camera.CameraInfo.CAMERA_FACING_BACK) {
+                        cameraId = i;
+                        try {
+                            mCameraInstance = Camera.open(i);
+                        } catch (Exception e) {
+                            releaseCamera();
+                            finish();
+                            return;
+                        }
+                    }
+                }
             }
+            if (mCameraInstance == null) {
+                finish();
+                return;
+            }
+
+            CameraUtils.setCameraDisplayOrientation(ActivityCamera.this, cameraId, mCameraInstance);
+
+            Camera.Parameters parameters = mCameraInstance.getParameters();
+            List<String> focusModes = parameters.getSupportedFocusModes();
+            if (focusModes.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO))
+                parameters.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
+            mCameraInstance.setDisplayOrientation(90);
+            int desiredWidth = 1280;
+            int desiredHeight = 720;
+            CameraUtils.choosePreviewSize(parameters, desiredWidth, desiredHeight);
             mCameraInstance.setParameters(parameters);
 
+
+//            mCameraInstance = getCameraInstance(id);
+//            Camera.Parameters parameters = mCameraInstance.getParameters();
+//            // TODO adjust by getting supportedPreviewSizes and then choosing
+//            // the best one for screen size (best fill screen)
+//            parameters.setPreviewSize(720, 480);
+//            if (parameters.getSupportedFocusModes().contains(
+//                    Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
+//                parameters.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
+//            }
+//            mCameraInstance.setParameters(parameters);
+//
             int orientation = mCameraHelper.getCameraDisplayOrientation(
-                    ActivityCamera.this, mCurrentCameraId);
-            CameraInfo2 cameraInfo = new CameraInfo2();
-            mCameraHelper.getCameraInfo(mCurrentCameraId, cameraInfo);
-            boolean flipHorizontal = cameraInfo.facing == CameraInfo.CAMERA_FACING_FRONT
+                    ActivityCamera.this, cameraId);
+            CameraHelper.CameraInfo2 cameraInfo = new CameraHelper.CameraInfo2();
+            mCameraHelper.getCameraInfo(cameraId, cameraInfo);
+            boolean flipHorizontal = cameraInfo.facing == Camera.CameraInfo.CAMERA_FACING_FRONT
                     ? true : false;
             mGPUImage.setUpCamera(mCameraInstance, orientation, flipHorizontal, false);
+
+
         }
 
-        /** A safe way to get an instance of the Camera object. */
+        /**
+         * A safe way to get an instance of the Camera object.
+         */
         private Camera getCameraInstance(final int id) {
             Camera c = null;
             try {
                 c = mCameraHelper.openCamera(id);
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 e.printStackTrace();
             }
             return c;
         }
 
         private void releaseCamera() {
-            mCameraInstance.setPreviewCallback(null);
-            mCameraInstance.release();
-            mCameraInstance = null;
+            if (mCameraInstance!=null){
+                mCameraInstance.setPreviewCallback(null);
+                mCameraInstance.release();
+                mCameraInstance = null;
+            }
         }
     }
+
+    public void logSize(Camera.Parameters mParameters) {
+        List<Camera.Size> pictureSizes = mParameters.getSupportedPictureSizes();
+        int length = pictureSizes.size();
+        for (int i = 0; i < length; i++) {
+            Log.d("TEST", "SupportedPictureSizes : " + pictureSizes.get(i).width + "x" + pictureSizes.get(i).height);
+        }
+
+//List<Size> previewSizes = mCameraDevice.getCamera().getParameters().getSupportedPreviewSizes();
+        List<Camera.Size> previewSizes = mParameters.getSupportedPreviewSizes();
+        length = previewSizes.size();
+        for (int i = 0; i < length; i++) {
+            Log.d("TEST", "SupportedPreviewSizes : " + previewSizes.get(i).width + "x" + previewSizes.get(i).height);
+        }
+    }
+
 }
