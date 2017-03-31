@@ -72,9 +72,10 @@ public class ActivityCamera extends Activity implements OnSeekBarChangeListener,
 //      1。gpuimage init
         mGPUImage = new GPUImage(this);
         mGPUImage.setFilter(new jp.co.cyberagent.android.gpuimage.GPUImageBilateralFilter(30f));
-        mGPUImage.setFilter(new jp.co.cyberagent.android.gpuimage.GPUImageContrastFilter(1.5f));
-        mGPUImage.setFilter(new jp.co.cyberagent.android.gpuimage.GPUImageSaturationFilter(1.4f));
-        mGPUImage.setFilter(new jp.co.cyberagent.android.gpuimage.GPUImageBrightnessFilter(0.1f));
+        mGPUImage.setFilter(new jp.co.cyberagent.android.gpuimage.GPUImageContrastFilter(0.88f));
+        mGPUImage.setFilter(new jp.co.cyberagent.android.gpuimage.GPUImageSaturationFilter(0.7f));
+        mGPUImage.setFilter(new jp.co.cyberagent.android.gpuimage.GPUImageBrightnessFilter(0.32f));
+        mGPUImage.setFilter(new jp.co.cyberagent.android.gpuimage.GPUImageSharpenFilter(0.48f));
         mGPUImage.setGLSurfaceView((GLSurfaceView) findViewById(R.id.surfaceView));
 
         mCameraHelper = new CameraHelper(this);
@@ -91,6 +92,11 @@ public class ActivityCamera extends Activity implements OnSeekBarChangeListener,
             String[] permissions = {Manifest.permission.CAMERA};
             ActivityCompat.requestPermissions(this, permissions, 111);
         }
+
+
+        Log.e("systeminfo", "Product Model: " + android.os.Build.MODEL + ","
+                + android.os.Build.VERSION.SDK + ","
+                + android.os.Build.VERSION.RELEASE);
     }
 
 

@@ -20,6 +20,7 @@ import android.content.Context;
 import android.content.res.AssetManager;
 import android.graphics.PointF;
 import android.opengl.GLES20;
+import android.util.Log;
 
 import java.io.InputStream;
 import java.nio.FloatBuffer;
@@ -173,6 +174,7 @@ public class GPUImageFilter {
     }
 
     protected void setFloat(final int location, final float floatValue) {
+        Log.e("setFloat", "setFloat: "+floatValue);
         runOnDraw(new Runnable() {
             @Override
             public void run() {
